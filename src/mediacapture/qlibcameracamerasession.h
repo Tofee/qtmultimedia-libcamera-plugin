@@ -84,7 +84,6 @@ public:
 
     QList<QSize> getSupportedPreviewSizes() const;
     QList<QVideoFrame::PixelFormat> getSupportedPixelFormats() const;
-    QList<LibcameraCamera::FpsRange> getSupportedPreviewFpsRange() const;
 
     QImageEncoderSettings imageSettings() const { return m_actualImageSettings; }
     void setImageSettings(const QImageEncoderSettings &settings);
@@ -105,7 +104,7 @@ public:
     void addProbe(QLibcameraMediaVideoProbeControl *probe);
     void removeProbe(QLibcameraMediaVideoProbeControl *probe);
 
-    void setPreviewFormat(LibcameraCamera::ImageFormat format);
+    void setPreviewFormat(libcamera::PixelFormat format);
 
     struct PreviewCallback
     {
@@ -155,6 +154,8 @@ private:
 
     void applyImageSettings();
 
+    void requestComplete(libcamera::Request *request, const std::map<libcamera::Stream *, libcamera::Buffer *> &buffers);
+
     void processPreviewImage(int id, const QVideoFrame &frame, int rotation);
     void processCapturedImage(int id,
                               const QByteArray &data,
@@ -162,15 +163,14 @@ private:
                               QCameraImageCapture::CaptureDestinations dest,
                               const QString &fileName);
 
-    static QVideoFrame::PixelFormat QtPixelFormatFromLibcameraImageFormat(libcamera::PixelFormat);
-    static libcamera::PixelFormat LibcameraImageFormatFromQtPixelFormat(QVideoFrame::PixelFormat);
-
     void setStateHelper(QCamera::State state);
 
     libcamera::CameraManager m_cameraManager;
 
     unsigned int m_selectedCamera;
     std::shared_ptr<libcamera::Camera> m_camera;
+    std::unique_ptr<libcamera::CameraConfiguration> m_cameraViewfinderConfig;
+    std::unique_ptr<libcamera::CameraConfiguration> m_cameraImageCaptureConfig;
     int m_nativeOrientation;
     QLibcameraVideoOutput *m_videoOutput;
 

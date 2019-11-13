@@ -40,7 +40,7 @@
 #include "qlibcameracameraexposurecontrol.h"
 
 #include "qlibcameracamerasession.h"
-#include "libcameracamera.h"
+#include "libcamera/libcamera.h"
 
 QT_BEGIN_NAMESPACE
 
@@ -145,7 +145,10 @@ bool QLibcameraCameraExposureControl::setValue(ExposureParameter parameter, cons
         if (expCompIndex >= m_minExposureCompensationIndex
                 && expCompIndex <= m_maxExposureCompensationIndex) {
             qreal comp = expCompIndex * m_exposureCompensationStep;
-            m_session->camera()->setExposureCompensation(expCompIndex);
+
+            /// what is the correct syntax here?
+            //m_session->camera()->controls()["exposureCompensation"] = expCompIndex;
+
             if (!qFuzzyCompare(m_actualExposureCompensation, comp)) {
                 m_actualExposureCompensation = expCompIndex * m_exposureCompensationStep;
                 emit actualValueChanged(QCameraExposureControl::ExposureCompensation);
@@ -223,7 +226,9 @@ bool QLibcameraCameraExposureControl::setValue(ExposureParameter parameter, cons
                 break;
             }
 
-            m_session->camera()->setSceneMode(sceneMode);
+            /// what is the correct syntax here?
+            //m_session->camera()->controls()["sceneMode"] = sceneMode;
+
             emit actualValueChanged(QCameraExposureControl::ExposureMode);
 
             return true;
@@ -236,9 +241,11 @@ bool QLibcameraCameraExposureControl::setValue(ExposureParameter parameter, cons
 void QLibcameraCameraExposureControl::onCameraOpened()
 {
     m_supportedExposureCompensations.clear();
-    m_minExposureCompensationIndex = m_session->camera()->getMinExposureCompensation();
-    m_maxExposureCompensationIndex = m_session->camera()->getMaxExposureCompensation();
-    m_exposureCompensationStep = m_session->camera()->getExposureCompensationStep();
+
+    /// TODO
+    // m_minExposureCompensationIndex = m_session->camera()->controls()["minExposureCompensation"]
+    // m_maxExposureCompensationIndex = m_session->camera()->controls()["maxExposureCompensation"]
+    // m_exposureCompensationStep = m_session->camera()->controls()["exposureCompensationStep"]
     if (m_minExposureCompensationIndex != 0 || m_maxExposureCompensationIndex != 0) {
         for (int i = m_minExposureCompensationIndex; i <= m_maxExposureCompensationIndex; ++i)
             m_supportedExposureCompensations.append(i * m_exposureCompensationStep);
@@ -246,7 +253,8 @@ void QLibcameraCameraExposureControl::onCameraOpened()
     }
 
     m_supportedExposureModes.clear();
-    QStringList sceneModes = m_session->camera()->getSupportedSceneModes();
+    QStringList sceneModes;
+    /// TODO sceneModes = m_session->camera()->getSupportedSceneModes();
     if (!sceneModes.isEmpty()) {
         for (int i = 0; i < sceneModes.size(); ++i) {
             const QString &sceneMode = sceneModes.at(i);

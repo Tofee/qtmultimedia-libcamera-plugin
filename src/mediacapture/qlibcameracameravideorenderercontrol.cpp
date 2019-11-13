@@ -41,7 +41,7 @@
 
 #include "qlibcameracamerasession.h"
 #include "qlibcameravideooutput.h"
-#include "libcamerasurfaceview.h"
+
 #include "qlibcameramultimediautils.h"
 #include <qabstractvideosurface.h>
 #include <qvideosurfaceformat.h>

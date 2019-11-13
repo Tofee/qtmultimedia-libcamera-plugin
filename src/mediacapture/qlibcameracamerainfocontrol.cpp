@@ -41,15 +41,23 @@
 
 #include "qlibcameracamerasession.h"
 
+#include "libcamera/libcamera.h"
+
 QT_BEGIN_NAMESPACE
 
 QCamera::Position QLibcameraCameraInfoControl::position(const QString &deviceName)
 {
-    const QList<LibcameraCameraInfo> &cameras = QLibcameraCameraSession::availableCameras();
-    for (int i = 0; i < cameras.count(); ++i) {
-        const LibcameraCameraInfo &info = cameras.at(i);
-        if (QString::fromLatin1(info.name) == deviceName)
-            return info.position;
+    auto &cameras = QLibcameraCameraSession::availableCameras();
+    for (const auto &cam: cameras) {
+        if (QString::fromLatin1(cam->name().c_str()) == deviceName) {
+            /// what is the correct syntax here?
+            /*
+            if(m_session->camera()->controls()["position"] == 0)
+                return QCamera::BackFace;
+            else
+                return QCamera::FrontFace;
+            */
+        }
     }
 
     return QCamera::UnspecifiedPosition;
@@ -57,11 +65,12 @@ QCamera::Position QLibcameraCameraInfoControl::position(const QString &deviceNam
 
 int QLibcameraCameraInfoControl::orientation(const QString &deviceName)
 {
-    const QList<LibcameraCameraInfo> &cameras = QLibcameraCameraSession::availableCameras();
-    for (int i = 0; i < cameras.count(); ++i) {
-        const LibcameraCameraInfo &info = cameras.at(i);
-        if (QString::fromLatin1(info.name) == deviceName)
-            return info.orientation;
+    auto &cameras = QLibcameraCameraSession::availableCameras();
+    for (const auto &cam: cameras) {
+        if (QString::fromLatin1(cam->name().c_str()) == deviceName) {
+            /// what is the correct syntax here?
+            // return (int)m_session->camera()->controls()["orientation"];
+        }
     }
 
     return 0;

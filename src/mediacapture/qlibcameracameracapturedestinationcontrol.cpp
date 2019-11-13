@@ -58,7 +58,7 @@ bool QLibcameraCameraCaptureDestinationControl::isCaptureDestinationSupported(QC
 
 QCameraImageCapture::CaptureDestinations QLibcameraCameraCaptureDestinationControl::captureDestination() const
 {
-    return m_session->captureDestination();;
+    return m_session->captureDestination();
 }
 
 void QLibcameraCameraCaptureDestinationControl::setCaptureDestination(QCameraImageCapture::CaptureDestinations destination)

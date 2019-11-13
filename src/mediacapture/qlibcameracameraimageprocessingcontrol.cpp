@@ -40,7 +40,7 @@
 #include "qlibcameracameraimageprocessingcontrol.h"
 
 #include "qlibcameracamerasession.h"
-#include "libcameracamera.h"
+#include "libcamera/libcamera.h"
 
 QT_BEGIN_NAMESPACE
 
@@ -93,7 +93,8 @@ void QLibcameraCameraImageProcessingControl::setWhiteBalanceModeHelper(QCameraIm
 {
     QString wb = m_supportedWhiteBalanceModes.value(mode, QString());
     if (!wb.isEmpty()) {
-        m_session->camera()->setWhiteBalance(wb);
+        /// what is the correct syntax here?
+        //m_session->camera()->controls()["whiteBalance"] = wb;
         m_whiteBalanceMode = mode;
     }
 }
@@ -101,7 +102,8 @@ void QLibcameraCameraImageProcessingControl::setWhiteBalanceModeHelper(QCameraIm
 void QLibcameraCameraImageProcessingControl::onCameraOpened()
 {
     m_supportedWhiteBalanceModes.clear();
-    QStringList whiteBalanceModes = m_session->camera()->getSupportedWhiteBalance();
+    QStringList whiteBalanceModes;
+    /// TODO whiteBalanceModes = m_session->camera()->getSupportedWhiteBalance();
     for (int i = 0; i < whiteBalanceModes.size(); ++i) {
         const QString &wb = whiteBalanceModes.at(i);
         if (wb == QLatin1String("auto")) {

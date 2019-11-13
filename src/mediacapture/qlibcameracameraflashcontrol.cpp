@@ -40,7 +40,7 @@
 #include "qlibcameracameraflashcontrol.h"
 
 #include "qlibcameracamerasession.h"
-#include "libcameracamera.h"
+#include "libcamera/libcamera.h"
 
 QT_BEGIN_NAMESPACE
 
@@ -69,8 +69,10 @@ void QLibcameraCameraFlashControl::setFlashMode(QCameraExposure::FlashModes mode
         return;
 
     // if torch was enabled, it first needs to be turned off before setting another mode
-    if (m_flashMode == QCameraExposure::FlashVideoLight)
-        m_session->camera()->setFlashMode(QLatin1String("off"));
+    if (m_flashMode == QCameraExposure::FlashVideoLight) {
+        /// what is the correct syntax here?
+        //m_session->camera()->controls()["flashMode"] = "off";
+    }
 
     m_flashMode = mode;
 
@@ -86,7 +88,8 @@ void QLibcameraCameraFlashControl::setFlashMode(QCameraExposure::FlashModes mode
     else // FlashOff
         flashMode = QLatin1String("off");
 
-    m_session->camera()->setFlashMode(flashMode);
+    /// what is the correct syntax here?
+    //m_session->camera()->controls()["flashMode"] = flashMode;
 }
 
 bool QLibcameraCameraFlashControl::isFlashModeSupported(QCameraExposure::FlashModes mode) const
@@ -104,7 +107,8 @@ void QLibcameraCameraFlashControl::onCameraOpened()
 {
     m_supportedFlashModes.clear();
 
-    QStringList flashModes = m_session->camera()->getSupportedFlashModes();
+    QStringList flashModes;
+    /// TODO flashModes = m_session->camera()->getSupportedFlashModes();
     for (int i = 0; i < flashModes.size(); ++i) {
         const QString &flashMode = flashModes.at(i);
         if (flashMode == QLatin1String("off"))

@@ -40,7 +40,7 @@
 #include "qlibcameravideodeviceselectorcontrol.h"
 
 #include "qlibcameracamerasession.h"
-#include "libcameracamera.h"
+#include "libcamera/libcamera.h"
 
 QT_BEGIN_NAMESPACE
 
@@ -57,23 +57,23 @@ QLibcameraVideoDeviceSelectorControl::~QLibcameraVideoDeviceSelectorControl()
 
 int QLibcameraVideoDeviceSelectorControl::deviceCount() const
 {
-    return QLibcameraCameraSession::availableCameras().count();
+    return QLibcameraCameraSession::availableCameras().size();
 }
 
 QString QLibcameraVideoDeviceSelectorControl::deviceName(int index) const
 {
-    if (index < 0 || index >= QLibcameraCameraSession::availableCameras().count())
+    if (index < 0 || index >= QLibcameraCameraSession::availableCameras().size())
         return QString();
 
-    return QString::fromLatin1(QLibcameraCameraSession::availableCameras().at(index).name);
+    return QString::fromLatin1(QLibcameraCameraSession::availableCameras().at(index)->name().c_str());
 }
 
 QString QLibcameraVideoDeviceSelectorControl::deviceDescription(int index) const
 {
-    if (index < 0 || index >= QLibcameraCameraSession::availableCameras().count())
+    if (index < 0 || index >= QLibcameraCameraSession::availableCameras().size())
         return QString();
 
-    return QLibcameraCameraSession::availableCameras().at(index).description;
+    return QLibcameraCameraSession::availableCameras().at(index)->name().c_str();
 }
 
 int QLibcameraVideoDeviceSelectorControl::defaultDevice() const

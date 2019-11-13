@@ -40,7 +40,7 @@
 #include "qlibcameracameralockscontrol.h"
 
 #include "qlibcameracamerasession.h"
-#include "libcameracamera.h"
+#include "libcamera/libcamera.h"
 #include <qtimer.h>
 
 QT_BEGIN_NAMESPACE
@@ -92,6 +92,8 @@ void QLibcameraCameraLocksControl::searchAndLock(QCamera::LockTypes locks)
     // filter out unsupported locks
     locks &= m_supportedLocks;
 
+    /// TODO
+    /*
     if (locks.testFlag(QCamera::LockFocus)) {
         QString focusMode = m_session->camera()->getFocusMode();
         if (focusMode == QLatin1String("auto")
@@ -132,6 +134,7 @@ void QLibcameraCameraLocksControl::searchAndLock(QCamera::LockTypes locks)
             setWhiteBalanceLockStatus(QCamera::Locked, QCamera::LockAcquired);
         }
     }
+    */
 
     if (m_exposureLockStatus == QCamera::Searching || m_whiteBalanceLockStatus == QCamera::Searching)
         m_recalculateTimer->start();
@@ -148,6 +151,8 @@ void QLibcameraCameraLocksControl::unlock(QCamera::LockTypes locks)
     // filter out unsupported locks
     locks &= m_supportedLocks;
 
+    /// TODO
+    /*
     if (locks.testFlag(QCamera::LockFocus)) {
         m_session->camera()->cancelAutoFocus();
         setFocusLockStatus(QCamera::Unlocked, QCamera::UserRequest);
@@ -162,6 +167,7 @@ void QLibcameraCameraLocksControl::unlock(QCamera::LockTypes locks)
         m_session->camera()->setAutoWhiteBalanceLock(false);
         setWhiteBalanceLockStatus(QCamera::Unlocked, QCamera::UserRequest);
     }
+    */
 }
 
 void QLibcameraCameraLocksControl::onCameraOpened()
@@ -170,6 +176,9 @@ void QLibcameraCameraLocksControl::onCameraOpened()
     m_focusLockStatus = QCamera::Unlocked;
     m_exposureLockStatus = QCamera::Unlocked;
     m_whiteBalanceLockStatus = QCamera::Unlocked;
+
+    /// TODO
+    /*
 
     // check if focus lock is supported
     QStringList focusModes = m_session->camera()->getSupportedFocusModes();
@@ -202,6 +211,8 @@ void QLibcameraCameraLocksControl::onCameraOpened()
         connect(m_session->camera(), SIGNAL(whiteBalanceChanged()),
                 this, SLOT(onWhiteBalanceChanged()));
     }
+
+    */
 }
 
 void QLibcameraCameraLocksControl::onCameraAutoFocusComplete(bool success)
@@ -214,12 +225,14 @@ void QLibcameraCameraLocksControl::onCameraAutoFocusComplete(bool success)
 void QLibcameraCameraLocksControl::onRecalculateTimeOut()
 {
     if (m_exposureLockStatus == QCamera::Searching) {
-        m_session->camera()->setAutoExposureLock(true);
+        /// what is the correct syntax here?
+        /// m_session->camera()->controls()["autoExposureLock"] = true;
         setExposureLockStatus(QCamera::Locked, QCamera::LockAcquired);
     }
 
     if (m_whiteBalanceLockStatus == QCamera::Searching) {
-        m_session->camera()->setAutoWhiteBalanceLock(true);
+        /// what is the correct syntax here?
+        /// m_session->camera()->controls()["autoWhiteBalanceLock"] = true;
         setWhiteBalanceLockStatus(QCamera::Locked, QCamera::LockAcquired);
     }
 }

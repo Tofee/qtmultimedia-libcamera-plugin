@@ -40,7 +40,7 @@
 #include "qlibcameraimageencodercontrol.h"
 
 #include "qlibcameracamerasession.h"
-#include "libcameracamera.h"
+#include "libcamera/libcamera.h"
 
 QT_BEGIN_NAMESPACE
 
@@ -87,7 +87,8 @@ void QLibcameraImageEncoderControl::setImageSettings(const QImageEncoderSettings
 
 void QLibcameraImageEncoderControl::onCameraOpened()
 {
-    m_supportedResolutions = m_session->camera()->getSupportedPictureSizes();
+    /// TODO (use the CaptureImage stream config)
+    //    m_supportedResolutions = m_session->camera()->getSupportedPictureSizes();
 }
 
 QT_END_NAMESPACE

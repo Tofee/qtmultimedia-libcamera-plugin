@@ -41,6 +41,8 @@
 #include "qlibcameracamerasession.h"
 
 #include "libcamera/libcamera.h"
+#include "libcameraqteventdispatcher.h"
+
 #include "qlibcameravideooutput.h"
 #include "qlibcameramediavideoprobecontrol.h"
 #include "qlibcameramultimediautils.h"
@@ -57,7 +59,7 @@
 #include <private/qmemoryvideobuffer_p.h>
 #include <private/qvideoframe_p.h>
 
-static QLibcameraCameraSession *g_currentCameraSession = nullptr;
+static libcamera::CameraManager *g_cameraManager = nullptr;
 
 QT_BEGIN_NAMESPACE
 
@@ -90,14 +92,18 @@ QLibcameraCameraSession::QLibcameraCameraSession(QObject *parent)
                 this, SLOT(onApplicationStateChanged(Qt::ApplicationState)));
     }
 
-    g_currentCameraSession = this;
+    std::unique_ptr<libcamera::EventDispatcher> dispatcher(new LibcameraQtEventDispatcher());
+    m_cameraManager.setEventDispatcher(std::move(dispatcher));
+    m_cameraManager.start();
+
+    g_cameraManager = &m_cameraManager;
 }
 
 QLibcameraCameraSession::~QLibcameraCameraSession()
 {
     close();
 
-    if(g_currentCameraSession==this) g_currentCameraSession = nullptr;
+    if(g_cameraManager == &m_cameraManager) g_cameraManager = nullptr;
 }
 
 void QLibcameraCameraSession::setCaptureMode(QCamera::CaptureModes mode)
@@ -162,7 +168,7 @@ void QLibcameraCameraSession::setStateHelper(QCamera::State state)
 
 const std::vector<std::shared_ptr<libcamera::Camera>> &QLibcameraCameraSession::availableCameras()
 {
-    return g_currentCameraSession->m_cameraManager.cameras();
+    return g_cameraManager->cameras();
 }
 
 bool QLibcameraCameraSession::open()
@@ -175,6 +181,14 @@ bool QLibcameraCameraSession::open()
     m_camera = m_cameraManager.cameras()[m_selectedCamera];
 
     if (m_camera) {
+        m_camera->acquire();
+
+        m_camera->requestCompleted.connect(this, &QLibcameraCameraSession::requestComplete);
+
+        // generate a default Viewfinder configuration
+        m_cameraViewfinderConfig = m_camera->generateConfiguration({ StreamRole::Viewfinder });
+        m_cameraImageCaptureConfig = m_camera->generateConfiguration({ StreamRole::StillCapture });
+
         /*
         connect(m_camera, SIGNAL(pictureExposed()), this, SLOT(onCameraPictureExposed()));
         connect(m_camera, SIGNAL(lastPreviewFrameFetched(QVideoFrame)),
@@ -193,17 +207,48 @@ bool QLibcameraCameraSession::open()
         // m_nativeOrientation = m_camera.getNativeOrientation();
 
         m_status = QCamera::LoadedStatus;
-
+        /*
         if (m_camera->getPreviewFormat() != LibcameraCamera::NV21)
             m_camera->setPreviewFormat(LibcameraCamera::NV21);
 
         m_camera->notifyNewFrames(m_videoProbes.count() || m_previewCallback);
-
+        */
         emit opened();
         emit statusChanged(m_status);
     }
 
-    return m_camera != 0;
+    return m_camera != nullptr;
+}
+
+void QLibcameraCameraSession::requestComplete(libcamera::Request *request, const std::map<libcamera::Stream *, libcamera::Buffer *> &buffers)
+{
+    if (request->status() == libcamera::Request::RequestCancelled)
+        return;
+
+    libcamera::Buffer *buffer = buffers.begin()->second;
+    /// TODO: display(buffer);
+
+    request = m_camera->createRequest();
+    if (!request) {
+        qCritical("Can't create request");
+        return;
+    }
+
+    for (auto it = buffers.begin(); it != buffers.end(); ++it) {
+        libcamera::Stream *stream = it->first;
+        libcamera::Buffer *buffer = it->second;
+        unsigned int index = buffer->index();
+
+        std::unique_ptr<libcamera::Buffer> newBuffer = stream->createBuffer(index);
+        if (!newBuffer) {
+            qCritical() << "Can't create buffer " << index;
+            return;
+        }
+
+        request->addBuffer(std::move(newBuffer));
+    }
+
+    m_camera->queueRequest(request);
 }
 
 void QLibcameraCameraSession::close()
@@ -223,7 +268,7 @@ void QLibcameraCameraSession::close()
     m_actualViewfinderSettings = m_requestedViewfinderSettings;
 
     m_camera->release();
-    m_camera = 0;
+    m_camera = nullptr;
 
     m_status = QCamera::UnloadedStatus;
     emit statusChanged(m_status);
@@ -243,7 +288,7 @@ void QLibcameraCameraSession::setVideoOutput(QLibcameraVideoOutput *output)
         else
             connect(m_videoOutput, SIGNAL(readyChanged(bool)), this, SLOT(onVideoOutputReady(bool)));
     } else {
-        m_videoOutput = 0;
+        m_videoOutput = nullptr;
     }
 }
 
@@ -263,148 +308,88 @@ void QLibcameraCameraSession::applyViewfinderSettings(const QSize &captureSize, 
     if (!m_camera)
         return;
 
-    const QSize currentViewfinderResolution = m_camera->previewSize();
-    const LibcameraCamera::ImageFormat currentPreviewFormat = m_camera->getPreviewFormat();
-    const LibcameraCamera::FpsRange currentFpsRange = m_camera->getPreviewFpsRange();
+    libcamera::StreamConfiguration &cfg = m_cameraViewfinderConfig->at(0);
+
+    QSize sizeToApply = captureSize;
+    if(captureSize.isEmpty()){
+        sizeToApply = m_requestedViewfinderSettings.resolution();
+    }
+    if(!sizeToApply.isEmpty())
+    {
+        cfg.size.width = sizeToApply.width();
+        cfg.size.height = sizeToApply.height();
+    }
 
     // -- adjust resolution
-    QSize adjustedViewfinderResolution;
-    const bool validCaptureSize = captureSize.width() > 0 && captureSize.height() > 0;
-    if (m_captureMode.testFlag(QCamera::CaptureVideo)
-            && validCaptureSize
-            && m_camera->getPreferredPreviewSizeForVideo().isEmpty()) {
-        // According to the Libcamera doc, if getPreferredPreviewSizeForVideo() returns null, it means
-        // the preview size cannot be different from the capture size
-        adjustedViewfinderResolution = captureSize;
-    } else {
-        qreal captureAspectRatio = 0;
-        if (validCaptureSize)
-            captureAspectRatio = qreal(captureSize.width()) / qreal(captureSize.height());
-
-        const QList<QSize> previewSizes = m_camera->getSupportedPreviewSizes();
-
-        const QSize vfRes = m_requestedViewfinderSettings.resolution();
-        if (vfRes.width() > 0 && vfRes.height() > 0
-                && (!validCaptureSize || qAbs(captureAspectRatio - (qreal(vfRes.width()) / vfRes.height())) < 0.01)
-                && previewSizes.contains(vfRes)) {
-            adjustedViewfinderResolution = vfRes;
-        } else if (validCaptureSize) {
-            // search for viewfinder resolution with the same aspect ratio
-            qreal minAspectDiff = 1;
-            QSize closestResolution;
-            for (int i = previewSizes.count() - 1; i >= 0; --i) {
-                const QSize &size = previewSizes.at(i);
-                const qreal sizeAspect = qreal(size.width()) / size.height();
-                if (qFuzzyCompare(captureAspectRatio, sizeAspect)) {
-                    adjustedViewfinderResolution = size;
-                    break;
-                } else if (minAspectDiff > qAbs(sizeAspect - captureAspectRatio)) {
-                    closestResolution = size;
-                    minAspectDiff = qAbs(sizeAspect - captureAspectRatio);
-                }
-            }
-            if (!adjustedViewfinderResolution.isValid()) {
-                qWarning("Cannot find a viewfinder resolution matching the capture aspect ratio.");
-                if (closestResolution.isValid()) {
-                    adjustedViewfinderResolution = closestResolution;
-                    qWarning("Using closest viewfinder resolution.");
-                } else {
-                    return;
-                }
-            }
-        } else {
-            adjustedViewfinderResolution = previewSizes.last();
-        }
+    CameraConfiguration::Status validation = m_cameraViewfinderConfig->validate();
+    if (validation == CameraConfiguration::Invalid) {
+            qWarning("Cannot find a viewfinder resolution matching the capture aspect ratio.");
+            return;
     }
-    m_actualViewfinderSettings.setResolution(adjustedViewfinderResolution);
+    if (validation == CameraConfiguration::Adjusted) {
+            qWarning() << "Using closest viewfinder resolution: " << cfg.size.toString().c_str();
+    }
 
     // -- adjust pixel format
-
-    LibcameraCamera::ImageFormat adjustedPreviewFormat = LibcameraCamera::NV21;
+    libcamera::PixelFormat adjustedPreviewFormat = DRM_FORMAT_NV21;
     if (m_requestedViewfinderSettings.pixelFormat() != QVideoFrame::Format_Invalid) {
-        const LibcameraCamera::ImageFormat f = LibcameraImageFormatFromQtPixelFormat(m_requestedViewfinderSettings.pixelFormat());
-        if (f == LibcameraCamera::UnknownImageFormat || !m_camera->getSupportedPreviewFormats().contains(f))
+        adjustedPreviewFormat = LibcameraPixelFormatFromQtPixelFormat(m_requestedViewfinderSettings.pixelFormat());
+        if (adjustedPreviewFormat == DRM_FORMAT_INVALID)
             qWarning("Unsupported viewfinder pixel format");
         else
-            adjustedPreviewFormat = f;
-    }
-    m_actualViewfinderSettings.setPixelFormat(QtPixelFormatFromLibcameraImageFormat(adjustedPreviewFormat));
-
-    // -- adjust FPS
-
-    LibcameraCamera::FpsRange adjustedFps = currentFpsRange;
-    const LibcameraCamera::FpsRange requestedFpsRange = LibcameraCamera::FpsRange::makeFromQReal(m_requestedViewfinderSettings.minimumFrameRate(),
-                                                                                             m_requestedViewfinderSettings.maximumFrameRate());
-    if (requestedFpsRange.min > 0 || requestedFpsRange.max > 0) {
-        int minDist = INT_MAX;
-        const QList<LibcameraCamera::FpsRange> supportedFpsRanges = m_camera->getSupportedPreviewFpsRange();
-        auto it = supportedFpsRanges.rbegin(), end = supportedFpsRanges.rend();
-        for (; it != end; ++it) {
-            int dist = (requestedFpsRange.min > 0 ? qAbs(requestedFpsRange.min - it->min) : 0)
-                       + (requestedFpsRange.max > 0 ? qAbs(requestedFpsRange.max - it->max) : 0);
-            if (dist < minDist) {
-                minDist = dist;
-                adjustedFps = *it;
-                if (minDist == 0)
-                    break; // exact match
-            }
+        {
+            cfg.pixelFormat = adjustedPreviewFormat;
+            if(CameraConfiguration::Invalid == m_cameraViewfinderConfig->validate())
+                qWarning("Unsupported viewfinder pixel format");
         }
     }
-    m_actualViewfinderSettings.setMinimumFrameRate(adjustedFps.getMinReal());
-    m_actualViewfinderSettings.setMaximumFrameRate(adjustedFps.getMaxReal());
 
     // -- Set values on camera
+    m_camera->configure(m_cameraViewfinderConfig.get());
 
-    if (currentViewfinderResolution != adjustedViewfinderResolution
-            || currentPreviewFormat != adjustedPreviewFormat
-            || currentFpsRange.min != adjustedFps.min
-            || currentFpsRange.max != adjustedFps.max) {
-
-        if (m_videoOutput)
-            m_videoOutput->setVideoSize(adjustedViewfinderResolution);
-
-        // if preview is started, we have to stop it first before changing its size
-        if (m_previewStarted && restartPreview)
-            m_camera->stopPreview();
-
-        m_camera->setPreviewSize(adjustedViewfinderResolution);
-        m_camera->setPreviewFormat(adjustedPreviewFormat);
-        m_camera->setPreviewFpsRange(adjustedFps);
-
-        // restart preview
-        if (m_previewStarted && restartPreview)
-            m_camera->startPreview();
-    }
+    /*
+    // restart preview
+    if (m_previewStarted && restartPreview)
+        m_camera->startPreview();
+    */
 }
 
 QList<QSize> QLibcameraCameraSession::getSupportedPreviewSizes() const
 {
-    return m_camera ? m_camera->getSupportedPreviewSizes() : QList<QSize>();
+    QList<QSize> sizes;
+
+    if(m_cameraViewfinderConfig) {
+        libcamera::StreamConfiguration &cfg = m_cameraViewfinderConfig->at(0);
+        const libcamera::StreamFormats &nativeFormats = cfg.formats();
+        for(const auto &pixelFormat: nativeFormats.pixelformats())
+        {
+            for(const libcamera::Size &pixelFormatSize: nativeFormats.sizes(pixelFormat))
+            {
+                QSize qtSize(pixelFormatSize.width, pixelFormatSize.height);
+                if(!sizes.contains(qtSize)) sizes.append(qtSize);
+            }
+        }
+    }
+
+    return sizes;
 }
 
 QList<QVideoFrame::PixelFormat> QLibcameraCameraSession::getSupportedPixelFormats() const
 {
     QList<QVideoFrame::PixelFormat> formats;
 
-    if (!m_camera)
-        return formats;
-
-    const QList<LibcameraCamera::ImageFormat> nativeFormats = m_camera->getSupportedPreviewFormats();
-
-    formats.reserve(nativeFormats.size());
-
-    for (LibcameraCamera::ImageFormat nativeFormat : nativeFormats) {
-        QVideoFrame::PixelFormat format = QtPixelFormatFromLibcameraImageFormat(nativeFormat);
-        if (format != QVideoFrame::Format_Invalid)
-            formats.append(format);
+    if(m_cameraViewfinderConfig) {
+        libcamera::StreamConfiguration &cfg = m_cameraViewfinderConfig->at(0);
+        const libcamera::StreamFormats &nativeFormats = cfg.formats();
+        for(const auto &nativeFormat: nativeFormats.pixelformats())
+        {
+            QVideoFrame::PixelFormat format = QtPixelFormatFromLibcameraPixelFormat(nativeFormat);
+            if (format != QVideoFrame::Format_Invalid)
+                formats.append(format);
+        }
     }
 
     return formats;
-}
-
-QList<LibcameraCamera::FpsRange> QLibcameraCameraSession::getSupportedPreviewFpsRange() const
-{
-    return m_camera ? m_camera->getSupportedPreviewFpsRange() : QList<LibcameraCamera::FpsRange>();
 }
 
 struct NullSurface : QAbstractVideoSurface
@@ -437,9 +422,9 @@ bool QLibcameraCameraSession::startPreview()
 
         Q_ASSERT(m_videoOutput->surfaceTexture() || m_videoOutput->surfaceHolder());
 
-        if ((m_videoOutput->surfaceTexture() && !m_camera->setPreviewTexture(m_videoOutput->surfaceTexture()))
-                || (m_videoOutput->surfaceHolder() && !m_camera->setPreviewDisplay(m_videoOutput->surfaceHolder())))
-            return false;
+        //if ((m_videoOutput->surfaceTexture() && !m_camera->setPreviewTexture(m_videoOutput->surfaceTexture()))
+        //        || (m_videoOutput->surfaceHolder() && !m_camera->setPreviewDisplay(m_videoOutput->surfaceHolder())))
+        //    return false;
     } else {
         auto control = new QLibcameraCameraVideoRendererControl(this, this);
         control->setSurface(new NullSurface(this));
@@ -455,17 +440,59 @@ bool QLibcameraCameraSession::startPreview()
     applyViewfinderSettings(m_captureMode.testFlag(QCamera::CaptureStillImage) ? m_actualImageSettings.resolution()
                                                                                : QSize());
 
-    LibcameraMultimediaUtils::enableOrientationListener(true);
+    // LibcameraMultimediaUtils::enableOrientationListener(true);
 
-    // Before API level 24 the orientation was always 0, which is what we're expecting, so
-    // we'll enforce that here.
-    if (QtLibcameraPrivate::libcameraSdkVersion() > 23)
-        m_camera->setDisplayOrientation(0);
+    if (m_camera->allocateBuffers()) {
+        qCritical("Failed to allocate buffers");
+        return false;
+    }
 
-    m_camera->startPreview();
-    m_previewStarted = true;
+    bool success = true;
 
-    return true;
+    libcamera::StreamConfiguration &cfg = m_cameraViewfinderConfig->at(0);
+    libcamera::Stream *stream = cfg.stream();
+    std::vector<libcamera::Request *> requests;
+    for (unsigned int i = 0; i < cfg.bufferCount && success; ++i) {
+        libcamera::Request *request = m_camera->createRequest();
+        if (!request) {
+            qCritical("Can't create request");
+            success = false;
+            break;
+        }
+
+        std::unique_ptr<libcamera::Buffer> buffer = stream->createBuffer(i);
+        if (!buffer) {
+            qCritical() << "Can't create buffer " << i;
+            success = false;
+            break;
+        }
+
+        if (request->addBuffer(std::move(buffer)) < 0) {
+            qCritical("Can't set buffer for request");
+            success = false;
+            break;
+        }
+
+        requests.push_back(request);
+    }
+
+    if (success && m_camera->start()) {
+        qCritical("Failed to start capture");
+        success = false;
+    }
+    else {
+        m_previewStarted = true;
+
+        for (Request *request : requests) {
+            if (m_camera->queueRequest(request) < 0) {
+                qCritical("Can't queue request");
+                success = false;
+                break;
+            }
+        }
+    }
+
+    return success;
 }
 
 void QLibcameraCameraSession::stopPreview()
@@ -476,17 +503,13 @@ void QLibcameraCameraSession::stopPreview()
     m_status = QCamera::StoppingStatus;
     emit statusChanged(m_status);
 
-    LibcameraMultimediaUtils::enableOrientationListener(false);
-
-    m_camera->stopPreview();
-    m_camera->setPreviewSize(QSize());
-    m_camera->setPreviewTexture(0);
-    m_camera->setPreviewDisplay(0);
+    m_camera->stop();
 
     if (m_videoOutput) {
         m_videoOutput->stop();
         m_videoOutput->reset();
     }
+
     m_previewStarted = false;
 }
 
@@ -505,18 +528,8 @@ void QLibcameraCameraSession::setImageSettings(const QImageEncoderSettings &sett
 
 int QLibcameraCameraSession::currentCameraRotation() const
 {
-    if (!m_camera)
-        return 0;
-
-    // subtract natural camera orientation and physical device orientation
-    int rotation = 0;
-    int deviceOrientation = (LibcameraMultimediaUtils::getDeviceOrientation() + 45) / 90 * 90;
-    if (m_camera->getFacing() == LibcameraCamera::CameraFacingFront)
-        rotation = (m_nativeOrientation - deviceOrientation + 360) % 360;
-    else // back-facing camera
-        rotation = (m_nativeOrientation + deviceOrientation) % 360;
-
-    return rotation;
+    /// NOT AVAILABLE
+    return 0;
 }
 
 void QLibcameraCameraSession::addProbe(QLibcameraMediaVideoProbeControl *probe)
@@ -524,8 +537,7 @@ void QLibcameraCameraSession::addProbe(QLibcameraMediaVideoProbeControl *probe)
     m_videoProbesMutex.lock();
     if (probe)
         m_videoProbes << probe;
-    if (m_camera)
-        m_camera->notifyNewFrames(m_videoProbes.count() || m_previewCallback);
+
     m_videoProbesMutex.unlock();
 }
 
@@ -533,25 +545,27 @@ void QLibcameraCameraSession::removeProbe(QLibcameraMediaVideoProbeControl *prob
 {
     m_videoProbesMutex.lock();
     m_videoProbes.remove(probe);
-    if (m_camera)
-        m_camera->notifyNewFrames(m_videoProbes.count() || m_previewCallback);
+
     m_videoProbesMutex.unlock();
 }
 
-void QLibcameraCameraSession::setPreviewFormat(LibcameraCamera::ImageFormat format)
+void QLibcameraCameraSession::setPreviewFormat(libcamera::PixelFormat format)
 {
-    if (format == LibcameraCamera::UnknownImageFormat)
+    if (format == DRM_FORMAT_INVALID)
         return;
 
-    m_camera->setPreviewFormat(format);
+    libcamera::StreamConfiguration &cfg = m_cameraViewfinderConfig->at(0);
+    cfg.pixelFormat = format;
+    if(CameraConfiguration::Invalid == m_cameraViewfinderConfig->validate())
+        qWarning("Unsupported viewfinder pixel format");
+
+    m_camera->configure(m_cameraViewfinderConfig.get());
 }
 
 void QLibcameraCameraSession::setPreviewCallback(PreviewCallback *callback)
 {
     m_videoProbesMutex.lock();
     m_previewCallback = callback;
-    if (m_camera)
-        m_camera->notifyNewFrames(m_videoProbes.count() || m_previewCallback);
     m_videoProbesMutex.unlock();
 }
 
@@ -563,39 +577,30 @@ void QLibcameraCameraSession::applyImageSettings()
     if (m_actualImageSettings.codec().isEmpty())
         m_actualImageSettings.setCodec(QLatin1String("jpeg"));
 
-    const QSize requestedResolution = m_requestedImageSettings.resolution();
-    const QList<QSize> supportedResolutions = m_camera->getSupportedPictureSizes();
-    if (!requestedResolution.isValid()) {
-        // if the viewfinder resolution is explicitly set, pick the highest available capture
-        // resolution with the same aspect ratio
-        if (m_requestedViewfinderSettings.resolution().isValid()) {
-            const QSize vfResolution = m_actualViewfinderSettings.resolution();
-            const qreal vfAspectRatio = qreal(vfResolution.width()) / vfResolution.height();
+    /// TODO: setup a nerw stream for image capture, set it up and request a new buffer
+    libcamera::StreamConfiguration &cfg = m_cameraImageCaptureConfig->at(0);
 
-            auto it = supportedResolutions.rbegin(), end = supportedResolutions.rend();
-            for (; it != end; ++it) {
-                if (qAbs(vfAspectRatio - (qreal(it->width()) / it->height())) < 0.01) {
-                    m_actualImageSettings.setResolution(*it);
-                    break;
-                }
-            }
-        } else {
-            // otherwise, use the highest supported one
-            m_actualImageSettings.setResolution(supportedResolutions.last());
-        }
-    } else if (!supportedResolutions.contains(requestedResolution)) {
-        // if the requested resolution is not supported, find the closest one
-        int reqPixelCount = requestedResolution.width() * requestedResolution.height();
-        QList<int> supportedPixelCounts;
-        for (int i = 0; i < supportedResolutions.size(); ++i) {
-            const QSize &s = supportedResolutions.at(i);
-            supportedPixelCounts.append(s.width() * s.height());
-        }
-        int closestIndex = qt_findClosestValue(supportedPixelCounts, reqPixelCount);
-        m_actualImageSettings.setResolution(supportedResolutions.at(closestIndex));
+    QSize sizeToApply = m_requestedImageSettings.resolution();
+    if(!sizeToApply.isEmpty())
+    {
+        cfg.size.width = sizeToApply.width();
+        cfg.size.height = sizeToApply.height();
     }
-    m_camera->setPictureSize(m_actualImageSettings.resolution());
 
+    // -- adjust resolution
+    CameraConfiguration::Status validation = m_cameraImageCaptureConfig->validate();
+    if (validation == CameraConfiguration::Invalid) {
+            qWarning("Cannot find a viewfinder resolution matching the capture aspect ratio.");
+            return;
+    }
+    if (validation == CameraConfiguration::Adjusted) {
+            qWarning() << "Using closest viewfinder resolution: " << cfg.size.toString().c_str();
+    }
+
+    // -- Set values on camera ... stop the preview stream ? no ?
+    // m_camera->configure(m_cameraImageCaptureConfig.get());
+
+    /*
     int jpegQuality = 100;
     switch (m_requestedImageSettings.quality()) {
     case QMultimedia::VeryLowQuality:
@@ -615,6 +620,7 @@ void QLibcameraCameraSession::applyImageSettings()
         break;
     }
     m_camera->setJpegQuality(jpegQuality);
+    */
 }
 
 bool QLibcameraCameraSession::isCaptureDestinationSupported(QCameraImageCapture::CaptureDestinations destination) const
@@ -679,9 +685,9 @@ int QLibcameraCameraSession::capture(const QString &fileName)
         applyViewfinderSettings(m_actualImageSettings.resolution());
 
         // adjust picture rotation depending on the device orientation
-        m_camera->setRotation(currentCameraRotation());
+        //m_camera->setRotation(currentCameraRotation());
 
-        m_camera->takePicture();
+        /// TODO m_camera->takePicture();
     } else {
         //: Drive mode is the camera's shutter mode, for example single shot, continuos exposure, etc.
         emit imageCaptureError(m_lastImageCaptureId, QCameraImageCapture::NotSupportedFeatureError,
@@ -705,7 +711,7 @@ void QLibcameraCameraSession::onCameraTakePictureFailed()
                            tr("Failed to capture image"));
 
     // Preview needs to be restarted and the preview call back must be setup again
-    m_camera->startPreview();
+//    m_camera->startPreview();
 }
 
 void QLibcameraCameraSession::onCameraPictureExposed()
@@ -714,7 +720,7 @@ void QLibcameraCameraSession::onCameraPictureExposed()
         return;
 
     emit imageExposed(m_currentImageCaptureId);
-    m_camera->fetchLastPreviewFrame();
+//    m_camera->fetchLastPreviewFrame();
 }
 
 void QLibcameraCameraSession::onLastPreviewFrameFetched(const QVideoFrame &frame)
@@ -725,7 +731,7 @@ void QLibcameraCameraSession::onLastPreviewFrameFetched(const QVideoFrame &frame
     QtConcurrent::run(this, &QLibcameraCameraSession::processPreviewImage,
                       m_currentImageCaptureId,
                       frame,
-                      m_camera->getRotation());
+                      0);
 }
 
 void QLibcameraCameraSession::processPreviewImage(int id, const QVideoFrame &frame, int rotation)
@@ -733,12 +739,13 @@ void QLibcameraCameraSession::processPreviewImage(int id, const QVideoFrame &fra
     // Preview display of front-facing cameras is flipped horizontally, but the frame data
     // we get here is not. Flip it ourselves if the camera is front-facing to match what the user
     // sees on the viewfinder.
-    QTransform transform;
-    if (m_camera->getFacing() == LibcameraCamera::CameraFacingFront)
-        transform.scale(-1, 1);
-    transform.rotate(rotation);
 
-    emit imageCaptured(id, qt_imageFromVideoFrame(frame).transformed(transform));
+//    QTransform transform;
+//    if (m_camera->getFacing() == LibcameraCamera::CameraFacingFront)
+//        transform.scale(-1, 1);
+//    transform.rotate(rotation);
+
+    emit imageCaptured(id, qt_imageFromVideoFrame(frame) /* .transformed(transform) */ );
 }
 
 void QLibcameraCameraSession::onNewPreviewFrame(const QVideoFrame &frame)
@@ -770,10 +777,6 @@ void QLibcameraCameraSession::onCameraPictureCaptured(const QByteArray &data)
     }
 
     m_captureCanceled = false;
-
-    // Preview needs to be restarted after taking a picture
-    if (m_camera)
-        m_camera->startPreview();
 }
 
 void QLibcameraCameraSession::onCameraPreviewStarted()
@@ -791,9 +794,6 @@ void QLibcameraCameraSession::onCameraPreviewFailedToStart()
     if (m_status == QCamera::StartingStatus) {
         Q_EMIT error(QCamera::CameraError, tr("Camera preview failed to start."));
 
-        LibcameraMultimediaUtils::enableOrientationListener(false);
-        m_camera->setPreviewSize(QSize());
-        m_camera->setPreviewTexture(0);
         if (m_videoOutput) {
             m_videoOutput->stop();
             m_videoOutput->reset();
@@ -834,13 +834,6 @@ void QLibcameraCameraSession::processCapturedImage(int id,
         QFile file(actualFileName);
         if (file.open(QFile::WriteOnly)) {
             if (file.write(data) == data.size()) {
-                // if the picture is saved into the standard picture location, register it
-                // with the Libcamera media scanner so it appears immediately in apps
-                // such as the gallery.
-                QString standardLoc = LibcameraMultimediaUtils::getDefaultMediaDirectory(LibcameraMultimediaUtils::DCIM);
-                if (actualFileName.startsWith(standardLoc))
-                    LibcameraMultimediaUtils::registerMediaFile(actualFileName);
-
                 emit imageSaved(id, actualFileName);
             } else {
                 emit imageCaptureError(id, QCameraImageCapture::OutOfSpaceError, file.errorString());
@@ -854,42 +847,6 @@ void QLibcameraCameraSession::processCapturedImage(int id,
     if (dest & QCameraImageCapture::CaptureToBuffer) {
         QVideoFrame frame(new QMemoryVideoBuffer(data, -1), resolution, QVideoFrame::Format_Jpeg);
         emit imageAvailable(id, frame);
-    }
-}
-
-QVideoFrame::PixelFormat QLibcameraCameraSession::QtPixelFormatFromLibcameraImageFormat(LibcameraCamera::ImageFormat format)
-{
-    switch (format) {
-    case LibcameraCamera::RGB565:
-        return QVideoFrame::Format_RGB565;
-    case LibcameraCamera::NV21:
-        return QVideoFrame::Format_NV21;
-    case LibcameraCamera::YUY2:
-        return QVideoFrame::Format_YUYV;
-    case LibcameraCamera::JPEG:
-        return QVideoFrame::Format_Jpeg;
-    case LibcameraCamera::YV12:
-        return QVideoFrame::Format_YV12;
-    default:
-        return QVideoFrame::Format_Invalid;
-    }
-}
-
-LibcameraCamera::ImageFormat QLibcameraCameraSession::LibcameraImageFormatFromQtPixelFormat(QVideoFrame::PixelFormat format)
-{
-    switch (format) {
-    case QVideoFrame::Format_RGB565:
-        return LibcameraCamera::RGB565;
-    case QVideoFrame::Format_NV21:
-        return LibcameraCamera::NV21;
-    case QVideoFrame::Format_YUYV:
-        return LibcameraCamera::YUY2;
-    case QVideoFrame::Format_Jpeg:
-        return LibcameraCamera::JPEG;
-    case QVideoFrame::Format_YV12:
-        return LibcameraCamera::YV12;
-    default:
-        return LibcameraCamera::UnknownImageFormat;
     }
 }
 

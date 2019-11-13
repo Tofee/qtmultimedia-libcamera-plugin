@@ -47,7 +47,7 @@ QLibcameraAudioInputSelectorControl::QLibcameraAudioInputSelectorControl(QLibcam
     : QAudioInputSelectorControl()
     , m_session(session)
 {
-    connect(m_session, SIGNAL(audioInputChanged(QString)), this, SIGNAL(activeInputChanged(QString)));
+//    connect(m_session, SIGNAL(audioInputChanged(QString)), this, SIGNAL(activeInputChanged(QString)));
 }
 
 QList<QString> QLibcameraAudioInputSelectorControl::availableInputs() const

@@ -40,9 +40,10 @@
 #ifndef QLIBCAMERAMULTIMEDIAUTILS_H
 #define QLIBCAMERAMULTIMEDIAUTILS_H
 
+#include <QVideoFrame>
 #include <qglobal.h>
 #include <qsize.h>
-#include "libcameracamera.h"
+#include "libcamera/libcamera.h"
 
 QT_BEGIN_NAMESPACE
 
@@ -52,10 +53,8 @@ int qt_findClosestValue(const QList<int> &list, int value);
 
 bool qt_sizeLessThan(const QSize &s1, const QSize &s2);
 
-QVideoFrame::PixelFormat qt_pixelFormatFromLibcameraImageFormat(LibcameraCamera::ImageFormat f);
-LibcameraCamera::ImageFormat qt_libcameraImageFormatFromPixelFormat(QVideoFrame::PixelFormat f);
-
-bool qt_libcameraRequestPermission(const QString &key);
+QVideoFrame::PixelFormat QtPixelFormatFromLibcameraPixelFormat(libcamera::PixelFormat);
+libcamera::PixelFormat LibcameraPixelFormatFromQtPixelFormat(QVideoFrame::PixelFormat);
 
 QT_END_NAMESPACE
 

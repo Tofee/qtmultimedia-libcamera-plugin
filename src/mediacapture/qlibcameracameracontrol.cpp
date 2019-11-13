@@ -44,7 +44,7 @@
 QT_BEGIN_NAMESPACE
 
 QLibcameraCameraControl::QLibcameraCameraControl(QLibcameraCameraSession *session)
-    : QCameraControl(0)
+    : QCameraControl(nullptr)
     , m_cameraSession(session)
 
 {
@@ -96,7 +96,7 @@ QCamera::Status QLibcameraCameraControl::status() const
 
 bool QLibcameraCameraControl::canChangeProperty(PropertyChangeType changeType, QCamera::Status status) const
 {
-    Q_UNUSED(status);
+    Q_UNUSED(status)
 
     switch (changeType) {
     case QCameraControl::CaptureMode:

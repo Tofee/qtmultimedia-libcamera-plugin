@@ -40,7 +40,7 @@
 #include "qlibcameracamerafocuscontrol.h"
 
 #include "qlibcameracamerasession.h"
-#include "libcameracamera.h"
+#include "libcamera/libcamera.h"
 
 QT_BEGIN_NAMESPACE
 
@@ -105,10 +105,13 @@ void QLibcameraCameraFocusControl::setFocusMode(QCameraFocus::FocusModes mode)
             focusMode = QLatin1String("infinity");
         }
 
-        m_session->camera()->setFocusMode(focusMode);
+        /// what is the correct syntax here?
+        //m_session->camera()->controls()["focusMode"] = focusMode;
 
         // reset focus position
-        m_session->camera()->cancelAutoFocus();
+
+        /// what is the correct syntax here?
+        //m_session->camera()->controls()["autoFocus"] = false;
 
         setFocusModeHelper(mode);
     }
@@ -179,19 +182,21 @@ QCameraFocusZoneList QLibcameraCameraFocusControl::focusZones() const
 
 void QLibcameraCameraFocusControl::onCameraOpened()
 {
+    /*
     connect(m_session->camera(), SIGNAL(previewSizeChanged()),
             this, SLOT(onViewportSizeChanged()));
     connect(m_session->camera(), SIGNAL(autoFocusStarted()),
             this, SLOT(onAutoFocusStarted()));
     connect(m_session->camera(), SIGNAL(autoFocusComplete(bool)),
             this, SLOT(onAutoFocusComplete(bool)));
-
+    */
     m_supportedFocusModes.clear();
     m_continuousPictureFocusSupported = false;
     m_continuousVideoFocusSupported = false;
     m_supportedFocusPointModes.clear();
 
-    QStringList focusModes = m_session->camera()->getSupportedFocusModes();
+    QStringList focusModes;
+    /// TODO focusModes = m_session->camera()->getSupportedFocusModes();
     for (int i = 0; i < focusModes.size(); ++i) {
         const QString &focusMode = focusModes.at(i);
         if (focusMode == QLatin1String("auto")) {
@@ -214,7 +219,9 @@ void QLibcameraCameraFocusControl::onCameraOpened()
     }
 
     m_supportedFocusPointModes << QCameraFocus::FocusPointAuto;
-    if (m_session->camera()->getMaxNumFocusAreas() > 0)
+
+    /// what is the correct syntax here?
+    if (0 /*m_session->camera()->controls()["maxNumFocusAreas"] > 0 */)
         m_supportedFocusPointModes << QCameraFocus::FocusPointCenter << QCameraFocus::FocusPointCustom;
 
     if (!m_supportedFocusModes.contains(m_focusMode))
@@ -236,7 +243,7 @@ void QLibcameraCameraFocusControl::updateFocusZones(QCameraFocusZone::FocusZoneS
     m_focusZones.clear();
 
     if (!m_actualFocusPoint.isNull()) {
-        QSize viewportSize = m_session->camera()->previewSize();
+        QSize viewportSize; /// TODO = m_session->camera()->previewSize();
 
         if (!viewportSize.isValid())
             return;
@@ -268,7 +275,9 @@ void QLibcameraCameraFocusControl::setCameraFocusArea()
             areas.append(adjustedArea(m_focusZones.at(i).area()));
 
     }
-    m_session->camera()->setFocusAreas(areas);
+
+    /// TODO
+    /// m_session->camera()->setFocusAreas(areas);
 }
 
 void QLibcameraCameraFocusControl::onViewportSizeChanged()
@@ -290,8 +299,11 @@ void QLibcameraCameraFocusControl::onCameraCaptureModeChanged()
         } else {
             focusMode = QLatin1String("continuous-picture");
         }
-        m_session->camera()->setFocusMode(focusMode);
-        m_session->camera()->cancelAutoFocus();
+
+        /// what is the correct syntax here?
+        //m_session->camera()->controls()["focusMode"] = focusMode;
+        /// what is the correct syntax here?
+        //m_session->camera()->controls()["autoFocus"] = false;
     }
 }
 

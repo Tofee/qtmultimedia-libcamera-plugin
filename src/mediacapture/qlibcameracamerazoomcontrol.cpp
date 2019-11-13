@@ -40,7 +40,7 @@
 #include "qlibcameracamerazoomcontrol.h"
 
 #include "qlibcameracamerasession.h"
-#include "libcameracamera.h"
+#include "libcamera/libcamera.h"
 #include "qlibcameramultimediautils.h"
 #include <qmath.h>
 
@@ -104,7 +104,8 @@ void QLibcameraCameraZoomControl::zoomTo(qreal optical, qreal digital)
         int validZoomIndex = qt_findClosestValue(m_zoomRatios, qRound(digital * 100));
         qreal newZoom = m_zoomRatios.at(validZoomIndex) / qreal(100);
         if (!qFuzzyCompare(m_currentZoom, newZoom)) {
-            m_cameraSession->camera()->setZoom(validZoomIndex);
+            /// what is the correct syntax here?
+            /// m_session->camera()->controls()["zoom"] = validZoomIndex;
             m_currentZoom = newZoom;
             emit currentDigitalZoomChanged(m_currentZoom);
         }
@@ -113,6 +114,8 @@ void QLibcameraCameraZoomControl::zoomTo(qreal optical, qreal digital)
 
 void QLibcameraCameraZoomControl::onCameraOpened()
 {
+    /// TODO
+    /*
     if (m_cameraSession->camera()->isZoomSupported()) {
         m_zoomRatios = m_cameraSession->camera()->getZoomRatios();
         qreal maxZoom = m_zoomRatios.last() / qreal(100);
@@ -121,7 +124,9 @@ void QLibcameraCameraZoomControl::onCameraOpened()
             emit maximumDigitalZoomChanged(m_maximumZoom);
         }
         zoomTo(1, m_requestedZoom);
-    } else {
+    } else
+    */
+    {
         m_zoomRatios.clear();
         if (!qFuzzyCompare(m_maximumZoom, qreal(1))) {
             m_maximumZoom = 1.0;

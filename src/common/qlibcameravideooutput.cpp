@@ -37,9 +37,9 @@
 **
 ****************************************************************************/
 
-#include "qandroidvideooutput.h"
+#include "qlibcameravideooutput.h"
 
-#include "androidsurfacetexture.h"
+#include "libcamerasurfacetexture.h"
 #include <QAbstractVideoSurface>
 #include <QVideoSurfaceFormat>
 #include <qevent.h>
@@ -87,10 +87,10 @@ void OpenGLResourcesDeleter::deleteThisHelper()
     delete this;
 }
 
-class AndroidTextureVideoBuffer : public QAbstractVideoBuffer
+class LibcameraTextureVideoBuffer : public QAbstractVideoBuffer
 {
 public:
-    AndroidTextureVideoBuffer(QAndroidTextureVideoOutput *output, const QSize &size)
+    LibcameraTextureVideoBuffer(QLibcameraTextureVideoOutput *output, const QSize &size)
         : QAbstractVideoBuffer(GLTextureHandle)
         , m_mapMode(NotMapped)
         , m_output(output)
@@ -99,7 +99,7 @@ public:
     {
     }
 
-    virtual ~AndroidTextureVideoBuffer() {}
+    virtual ~LibcameraTextureVideoBuffer() {}
 
     MapMode mapMode() const { return m_mapMode; }
 
@@ -129,7 +129,7 @@ public:
 
     QVariant handle() const
     {
-        AndroidTextureVideoBuffer *that = const_cast<AndroidTextureVideoBuffer*>(this);
+        LibcameraTextureVideoBuffer *that = const_cast<LibcameraTextureVideoBuffer*>(this);
         if (!that->updateFrame())
             return QVariant();
 
@@ -161,26 +161,26 @@ private:
     }
 
     MapMode m_mapMode;
-    QAndroidTextureVideoOutput *m_output;
+    QLibcameraTextureVideoOutput *m_output;
     QImage m_image;
     QSize m_size;
     bool m_textureUpdated;
 };
 
-QAndroidTextureVideoOutput::QAndroidTextureVideoOutput(QObject *parent)
-    : QAndroidVideoOutput(parent)
+QLibcameraTextureVideoOutput::QLibcameraTextureVideoOutput(QObject *parent)
+    : QLibcameraVideoOutput(parent)
     , m_surface(0)
     , m_surfaceTexture(0)
     , m_externalTex(0)
     , m_fbo(0)
     , m_program(0)
     , m_glDeleter(0)
-    , m_surfaceTextureCanAttachToContext(QtAndroidPrivate::androidSdkVersion() >= 16)
+    , m_surfaceTextureCanAttachToContext(QtLibcameraPrivate::libcameraSdkVersion() >= 16)
 {
 
 }
 
-QAndroidTextureVideoOutput::~QAndroidTextureVideoOutput()
+QLibcameraTextureVideoOutput::~QLibcameraTextureVideoOutput()
 {
     clearSurfaceTexture();
 
@@ -192,12 +192,12 @@ QAndroidTextureVideoOutput::~QAndroidTextureVideoOutput()
     }
 }
 
-QAbstractVideoSurface *QAndroidTextureVideoOutput::surface() const
+QAbstractVideoSurface *QLibcameraTextureVideoOutput::surface() const
 {
     return m_surface;
 }
 
-void QAndroidTextureVideoOutput::setSurface(QAbstractVideoSurface *surface)
+void QLibcameraTextureVideoOutput::setSurface(QAbstractVideoSurface *surface)
 {
     if (surface == m_surface)
         return;
@@ -218,12 +218,12 @@ void QAndroidTextureVideoOutput::setSurface(QAbstractVideoSurface *surface)
     }
 }
 
-bool QAndroidTextureVideoOutput::isReady()
+bool QLibcameraTextureVideoOutput::isReady()
 {
     return m_surfaceTextureCanAttachToContext || QOpenGLContext::currentContext() || m_externalTex;
 }
 
-bool QAndroidTextureVideoOutput::initSurfaceTexture()
+bool QLibcameraTextureVideoOutput::initSurfaceTexture()
 {
     if (m_surfaceTexture)
         return true;
@@ -245,7 +245,7 @@ bool QAndroidTextureVideoOutput::initSurfaceTexture()
 
     QMutexLocker locker(&m_mutex);
 
-    m_surfaceTexture = new AndroidSurfaceTexture(m_externalTex);
+    m_surfaceTexture = new LibcameraSurfaceTexture(m_externalTex);
 
     if (m_surfaceTexture->surfaceTexture() != 0) {
         connect(m_surfaceTexture, SIGNAL(frameAvailable()), this, SLOT(onFrameAvailable()));
@@ -260,7 +260,7 @@ bool QAndroidTextureVideoOutput::initSurfaceTexture()
     return m_surfaceTexture != 0;
 }
 
-void QAndroidTextureVideoOutput::clearSurfaceTexture()
+void QLibcameraTextureVideoOutput::clearSurfaceTexture()
 {
     QMutexLocker locker(&m_mutex);
     if (m_surfaceTexture) {
@@ -269,7 +269,7 @@ void QAndroidTextureVideoOutput::clearSurfaceTexture()
     }
 
     // Also reset the attached OpenGL texture
-    // Note: The Android SurfaceTexture class does not release the texture on deletion,
+    // Note: The Libcamera SurfaceTexture class does not release the texture on deletion,
     // only if detachFromGLContext() called (API level >= 16), so we'll do it manually,
     // on the render thread.
     if (m_surfaceTextureCanAttachToContext) {
@@ -279,7 +279,7 @@ void QAndroidTextureVideoOutput::clearSurfaceTexture()
     }
 }
 
-AndroidSurfaceTexture *QAndroidTextureVideoOutput::surfaceTexture()
+LibcameraSurfaceTexture *QLibcameraTextureVideoOutput::surfaceTexture()
 {
     if (!initSurfaceTexture())
         return 0;
@@ -287,7 +287,7 @@ AndroidSurfaceTexture *QAndroidTextureVideoOutput::surfaceTexture()
     return m_surfaceTexture;
 }
 
-void QAndroidTextureVideoOutput::setVideoSize(const QSize &size)
+void QLibcameraTextureVideoOutput::setVideoSize(const QSize &size)
 {
      QMutexLocker locker(&m_mutex);
     if (m_nativeSize == size)
@@ -298,14 +298,14 @@ void QAndroidTextureVideoOutput::setVideoSize(const QSize &size)
     m_nativeSize = size;
 }
 
-void QAndroidTextureVideoOutput::stop()
+void QLibcameraTextureVideoOutput::stop()
 {
     if (m_surface && m_surface->isActive())
         m_surface->stop();
     m_nativeSize = QSize();
 }
 
-void QAndroidTextureVideoOutput::reset()
+void QLibcameraTextureVideoOutput::reset()
 {
     // flush pending frame
     if (m_surface)
@@ -314,12 +314,12 @@ void QAndroidTextureVideoOutput::reset()
     clearSurfaceTexture();
 }
 
-void QAndroidTextureVideoOutput::onFrameAvailable()
+void QLibcameraTextureVideoOutput::onFrameAvailable()
 {
     if (!m_nativeSize.isValid() || !m_surface)
         return;
 
-    QAbstractVideoBuffer *buffer = new AndroidTextureVideoBuffer(this, m_nativeSize);
+    QAbstractVideoBuffer *buffer = new LibcameraTextureVideoBuffer(this, m_nativeSize);
     QVideoFrame frame(buffer, m_nativeSize, QVideoFrame::Format_ABGR32);
 
     if (m_surface->isActive() && (m_surface->surfaceFormat().pixelFormat() != frame.pixelFormat()
@@ -338,7 +338,7 @@ void QAndroidTextureVideoOutput::onFrameAvailable()
         m_surface->present(frame);
 }
 
-bool QAndroidTextureVideoOutput::renderFrameToFbo()
+bool QLibcameraTextureVideoOutput::renderFrameToFbo()
 {
     QMutexLocker locker(&m_mutex);
 
@@ -402,7 +402,7 @@ bool QAndroidTextureVideoOutput::renderFrameToFbo()
     return true;
 }
 
-void QAndroidTextureVideoOutput::createGLResources()
+void QLibcameraTextureVideoOutput::createGLResources()
 {
     Q_ASSERT(QOpenGLContext::currentContext() != NULL);
 
@@ -451,7 +451,7 @@ void QAndroidTextureVideoOutput::createGLResources()
     }
 }
 
-void QAndroidTextureVideoOutput::customEvent(QEvent *e)
+void QLibcameraTextureVideoOutput::customEvent(QEvent *e)
 {
     if (e->type() == QEvent::User) {
         // This is running in the render thread (OpenGL enabled)

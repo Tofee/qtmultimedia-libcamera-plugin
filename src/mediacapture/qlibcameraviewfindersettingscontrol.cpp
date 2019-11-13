@@ -54,21 +54,18 @@ QList<QCameraViewfinderSettings> QLibcameraViewfinderSettingsControl2::supported
 
     const QList<QSize> previewSizes = m_cameraSession->getSupportedPreviewSizes();
     const QList<QVideoFrame::PixelFormat> pixelFormats = m_cameraSession->getSupportedPixelFormats();
-    const QList<LibcameraCamera::FpsRange> fpsRanges = m_cameraSession->getSupportedPreviewFpsRange();
 
     viewfinderSettings.reserve(previewSizes.size() * pixelFormats.size() * fpsRanges.size());
 
     for (const QSize& size : previewSizes) {
         for (QVideoFrame::PixelFormat pixelFormat : pixelFormats) {
-            for (const LibcameraCamera::FpsRange& fpsRange : fpsRanges) {
                 QCameraViewfinderSettings s;
                 s.setResolution(size);
                 s.setPixelAspectRatio(QSize(1, 1));
                 s.setPixelFormat(pixelFormat);
-                s.setMinimumFrameRate(fpsRange.getMinReal());
-                s.setMaximumFrameRate(fpsRange.getMaxReal());
+                s.setMinimumFrameRate(5.);
+                s.setMaximumFrameRate(60.);
                 viewfinderSettings << s;
-            }
         }
     }
     return viewfinderSettings;
